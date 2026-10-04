@@ -1,40 +1,80 @@
-"""Shared visual theme for the dashboard.
+"""Shared visual theme for the dashboard — Bloomberg-terminal styling.
 
 Every Plotly figure should apply ``plotly_layout()`` so all charts share the
-same dark background, grid color, and font. Colors are referenced by name from
-``COLORS`` rather than hard-coded in tab modules.
+same black background, amber panel titles, grid color, and monospace font.
+Colors are referenced by name from ``COLORS`` rather than hard-coded in tab
+modules. CSS counterparts of these tokens live in ``assets/custom.css``.
 """
+from dash import html
 
 COLORS = {
-    "BG":      "#0d0d0d",
-    "PANEL":   "#1a1a1a",
-    "GRID":    "#2a2a2a",
-    "TEXT":    "#ffffff",
-    "MUTED":   "#888888",
-    "BULL":    "#00ff88",
-    "BEAR":    "#ff3333",
-    "WARN":    "#ffcc00",
-    "ORANGE":  "#ff9933",
-    "BLUE":    "#3399ff",
+    "BG":      "#000000",
+    "PANEL":   "#050505",
+    "GRID":    "#1f1f1f",
+    "BORDER":  "#2b2b2b",
+    "TEXT":    "#e8e8e8",
+    "MUTED":   "#8c8c8c",
+    "AMBER":   "#ffa028",
+    "BULL":    "#00d26a",
+    "BEAR":    "#ff433d",
+    "WARN":    "#ffd400",
+    "ORANGE":  "#ff8a1f",
+    "BLUE":    "#4aa8ff",
+    "CYAN":    "#3fd7e6",
+    "PURPLE":  "#b48cff",
 }
+
+FONT_MONO = '"IBM Plex Mono", "Consolas", "Lucida Console", monospace'
+
+# Diverging bear→neutral→bull scale for heatmaps (replaces RdYlGn).
+DIVERGING = [
+    [0.0, "#7a0f0c"], [0.25, COLORS["BEAR"]], [0.5, "#141414"],
+    [0.75, COLORS["BULL"]], [1.0, "#00703a"],
+]
 
 
 def plotly_layout(title=None, height=None, showlegend=True):
     layout = {
         "paper_bgcolor": COLORS["PANEL"],
         "plot_bgcolor":  COLORS["PANEL"],
-        "font": {"color": COLORS["TEXT"], "family": "Segoe UI, Arial, sans-serif", "size": 12},
-        "xaxis": {"gridcolor": COLORS["GRID"], "zerolinecolor": COLORS["GRID"], "color": COLORS["TEXT"]},
-        "yaxis": {"gridcolor": COLORS["GRID"], "zerolinecolor": COLORS["GRID"], "color": COLORS["TEXT"]},
-        "margin": {"l": 50, "r": 30, "t": 50 if title else 20, "b": 40},
+        "font": {"color": COLORS["TEXT"], "family": FONT_MONO, "size": 11},
+        "xaxis": {"gridcolor": COLORS["GRID"], "zerolinecolor": COLORS["BORDER"],
+                  "color": COLORS["MUTED"], "linecolor": COLORS["BORDER"],
+                  "tickfont": {"color": COLORS["MUTED"]}},
+        "yaxis": {"gridcolor": COLORS["GRID"], "zerolinecolor": COLORS["BORDER"],
+                  "color": COLORS["MUTED"], "linecolor": COLORS["BORDER"],
+                  "tickfont": {"color": COLORS["MUTED"]}},
+        "margin": {"l": 52, "r": 16, "t": 44 if title else 16, "b": 36},
         "showlegend": showlegend,
-        "legend": {"bgcolor": "rgba(0,0,0,0)", "font": {"color": COLORS["TEXT"]}},
+        "legend": {"bgcolor": "rgba(0,0,0,0)", "font": {"color": COLORS["TEXT"], "size": 10},
+                   "orientation": "h", "yanchor": "bottom", "y": 1.0,
+                   "xanchor": "right", "x": 1.0},
+        "hoverlabel": {"bgcolor": "#111111", "bordercolor": COLORS["AMBER"],
+                       "font": {"family": FONT_MONO, "color": COLORS["TEXT"]}},
+        "colorway": [COLORS["AMBER"], COLORS["BLUE"], COLORS["BULL"], COLORS["BEAR"],
+                     COLORS["CYAN"], COLORS["PURPLE"], COLORS["WARN"]],
     }
     if title:
-        layout["title"] = {"text": title, "font": {"color": COLORS["TEXT"], "size": 16}}
+        # Amber, uppercase, left-aligned — reads like a terminal panel header.
+        layout["title"] = {"text": str(title).upper(),
+                           "font": {"color": COLORS["AMBER"], "size": 12,
+                                    "family": FONT_MONO},
+                           "x": 0.0, "xanchor": "left", "xref": "paper",
+                           "y": 0.98, "yanchor": "top", "yref": "container",
+                           "pad": {"l": 4}}
     if height:
         layout["height"] = height
     return layout
+
+
+def term_panel(title, *children, right=None, className="", **kwargs):
+    """Bordered terminal panel with an amber header strip."""
+    header = html.Div([
+        html.Span(str(title).upper(), className="term-panel-title"),
+        html.Span(right, className="term-panel-right") if right is not None else None,
+    ], className="term-panel-hdr")
+    return html.Div([header, html.Div(list(children), className="term-panel-body")],
+                    className=f"term-panel {className}".strip(), **kwargs)
 
 
 def bull_or_bear(value, neutral_threshold=0.0):

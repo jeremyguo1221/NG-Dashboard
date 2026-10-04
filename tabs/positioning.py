@@ -12,7 +12,7 @@ import pytz
 
 import config
 from data import cftc, futures
-from utils.theme import COLORS, plotly_layout
+from utils.theme import COLORS, DIVERGING, plotly_layout
 
 NY = pytz.timezone("America/New_York")
 
@@ -81,13 +81,13 @@ def _build_percentile_gauge(df):
         title={"text": "Net MM Rank", "font": {"color": COLORS["TEXT"]}},
         gauge={
             "axis": {"range": [0, 100], "tickfont": {"color": COLORS["TEXT"]}},
-            "bar": {"color": COLORS["TEXT"]},
+            "bar": {"color": COLORS["AMBER"]},
             "bgcolor": COLORS["PANEL"],
             "steps": [
-                {"range": [0, 25],  "color": "#660000"},
-                {"range": [25, 50], "color": "#331a00"},
-                {"range": [50, 75], "color": "#1a3300"},
-                {"range": [75, 100],"color": "#006633"},
+                {"range": [0, 25],  "color": "#3a0b09"},
+                {"range": [25, 50], "color": "#2a1a05"},
+                {"range": [50, 75], "color": "#0f2a12"},
+                {"range": [75, 100],"color": "#003d1f"},
             ],
         },
     ))
@@ -108,7 +108,7 @@ def _build_heatmap(df):
         z[unique_years.index(y), int(w) - 1] = v
     fig.add_trace(go.Heatmap(z=z, x=list(range(1, 54)),
                               y=[str(y) for y in unique_years],
-                              colorscale="RdYlGn", zmid=0,
+                              colorscale=DIVERGING, zmid=0,
                               colorbar=dict(title="Δ Net",
                                             tickfont=dict(color=COLORS["TEXT"]))))
     fig.update_xaxes(title_text="Week of Year")
@@ -200,7 +200,7 @@ def register_callbacks(app):
 
     @app.callback(
         Output("cftc-history-store", "data"),
-        Input("cftc-interval", "n_intervals"),
+        Input("cftc-global-interval", "n_intervals"),
         State("cftc-history-store", "data"),
     )
     def fetch_cftc(_, existing):
@@ -225,26 +225,21 @@ def register_callbacks(app):
         records = df.to_dict("records")
         return {"records": records, "last_fetch_iso": now.isoformat()}
 
-    @app.callback(Output("cftc-mm-chart", "figure"),
-                  Input("cftc-history-store", "data"))
-    def mm_chart(d):  return _build_mm_chart(_df_from_store(d))
-
-    @app.callback(Output("cftc-percentile-gauge", "figure"),
-                  Input("cftc-history-store", "data"))
-    def gauge(d):     return _build_percentile_gauge(_df_from_store(d))
-
-    @app.callback(Output("cftc-heatmap", "figure"),
-                  Input("cftc-history-store", "data"))
-    def heatmap(d):   return _build_heatmap(_df_from_store(d))
-
-    @app.callback(Output("cftc-momentum", "figure"),
-                  Input("cftc-history-store", "data"))
-    def momentum(d):  return _build_momentum(_df_from_store(d))
-
-    @app.callback(Output("cftc-three-category", "figure"),
-                  Input("cftc-history-store", "data"))
-    def three_cat(d): return _build_three_category(_df_from_store(d))
-
-    @app.callback(Output("cftc-historical-signal", "figure"),
-                  Input("cftc-history-store", "data"))
-    def hist_sig(d):  return _build_historical_signal(_df_from_store(d))
+    # One multi-output callback, also keyed on the in-tab interval so it fires
+    # every time the tab mounts — the store itself may not change on remount
+    # (fetch_cftc returns no_update when the cached history is fresh).
+    @app.callback(
+        Output("cftc-mm-chart", "figure"),
+        Output("cftc-percentile-gauge", "figure"),
+        Output("cftc-heatmap", "figure"),
+        Output("cftc-momentum", "figure"),
+        Output("cftc-three-category", "figure"),
+        Output("cftc-historical-signal", "figure"),
+        Input("cftc-history-store", "data"),
+        Input("cftc-interval", "n_intervals"),
+    )
+    def render_figures(d, _n):
+        df = _df_from_store(d)
+        return (_build_mm_chart(df), _build_percentile_gauge(df),
+                _build_heatmap(df), _build_momentum(df),
+                _build_three_category(df), _build_historical_signal(df))

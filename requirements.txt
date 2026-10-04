@@ -10,7 +10,7 @@ beautifulsoup4>=4.12
 Pillow>=10.3
 pytz
 python-dateutil
-kaleido==0.2.1
+kaleido>=1.0  # plotly>=6 needs kaleido v1 (uses the local Chrome/Edge)
 reportlab>=4.2
 xlrd>=2.0
 

@@ -17,7 +17,9 @@ import config
 
 logger = logging.getLogger(__name__)
 
-_API_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts"
+# public.api.bsky.app now 403s searchPosts for anonymous callers; the
+# api.bsky.app AppView still serves it.
+_API_URL = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
 _HEADERS = {"User-Agent": "NGSentimentBot/1.0", "Accept": "application/json"}
 _TIMEOUT = 12
 

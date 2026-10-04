@@ -1,10 +1,10 @@
 """APScheduler background jobs for the NG sentiment pipeline.
 
-Three jobs:
-    every 15 min  → scrape + preprocess + score + insert + update 1h aggregates
-                    + check alerts
-    every 1 hour  → update 4h aggregates
-    every 6 hours → update 24h aggregates + prune raw_posts older than 30 days
+Two jobs:
+    every 15 min  → scrape + preprocess + score + insert + update 1h/4h/24h
+                    aggregates + check alerts (first run ~20s after startup,
+                    so every window is fresh as soon as the app is up)
+    every 6 hours → prune raw_posts older than 30 days
 
 Logging goes to logs/sentiment.log via a rotating handler (10MB × 5).
 
@@ -70,11 +70,11 @@ def job_15min() -> None:
 
     if not processed:
         logger.info("[job_15min] no relevant posts; aggregating empty windows")
+        _aggregate_all()
         try:
-            signal_aggregator.update_window("1h")
             alerts_sentiment.check_thresholds("1h")
         except Exception:
-            logger.exception("[job_15min] aggregate/alerts on empty failed")
+            logger.exception("[job_15min] alerts on empty failed")
         return
 
     # Score
@@ -107,10 +107,7 @@ def job_15min() -> None:
     logger.info("[job_15min] wrote %d posts, %d scores", written_posts, written_scores)
 
     # Aggregate + alert
-    try:
-        signal_aggregator.update_window("1h")
-    except Exception:
-        logger.exception("[job_15min] aggregate(1h) failed")
+    _aggregate_all()
     try:
         alerts_sentiment.check_thresholds("1h")
     except Exception:
@@ -118,20 +115,16 @@ def job_15min() -> None:
     logger.info("[job_15min] done")
 
 
-def job_hourly() -> None:
-    logger.info("[job_hourly] update 4h aggregates")
-    try:
-        signal_aggregator.update_window("4h")
-    except Exception:
-        logger.exception("[job_hourly] aggregate(4h) failed")
+def _aggregate_all() -> None:
+    for window in ("1h", "4h", "24h"):
+        try:
+            signal_aggregator.update_window(window)
+        except Exception:
+            logger.exception("[job_15min] aggregate(%s) failed", window)
 
 
 def job_six_hourly() -> None:
-    logger.info("[job_six_hourly] update 24h aggregates + prune")
-    try:
-        signal_aggregator.update_window("24h")
-    except Exception:
-        logger.exception("[job_six_hourly] aggregate(24h) failed")
+    logger.info("[job_six_hourly] prune")
     try:
         signal_aggregator.prune_old_raw_posts()
     except Exception:
@@ -159,15 +152,12 @@ def start_scheduler() -> BackgroundScheduler:
                       id="sentiment_15min", max_instances=1,
                       coalesce=True, replace_existing=True,
                       next_run_time=_in_seconds(20))
-        sched.add_job(job_hourly, "interval", hours=1,
-                      id="sentiment_hourly", max_instances=1,
-                      coalesce=True, replace_existing=True)
         sched.add_job(job_six_hourly, "interval", hours=6,
                       id="sentiment_six_hourly", max_instances=1,
                       coalesce=True, replace_existing=True)
         sched.start()
         _SCHEDULER = sched
-        logger.info("scheduler started (15min/1h/6h)")
+        logger.info("scheduler started (15min/6h)")
         return sched
 
 

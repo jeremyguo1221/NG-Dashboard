@@ -115,7 +115,7 @@ def _build_regional_hdd(records):
         fig.update_layout(**plotly_layout(title="Regional HDD — 10-day forecast", height=320))
         return fig
     dates = records[0]["dates"][:10]
-    region_colors = {"NE": COLORS["BLUE"], "MW": "#cc66ff", "S": COLORS["ORANGE"], "W": "#ffcc33"}
+    region_colors = {"NE": COLORS["BLUE"], "MW": COLORS["PURPLE"], "S": COLORS["ORANGE"], "W": COLORS["WARN"]}
     for region in ["NE", "MW", "S", "W"]:
         region_recs = [r for r in records if r["region"] == region]
         if not region_recs:

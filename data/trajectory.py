@@ -354,6 +354,7 @@ def calculate_demand_adjustment(cons_df: pd.DataFrame,
     return -_structural_growth_bcfd(cons_df["consumption_bcfd"]) * 7.0
 
 
+def calculate_weather_adjustment(weather_forecast_df: pd.DataFrame) -> pd.Series:
     """Weekly Bcf demand adjustment from HDD + CDD vs climate normal.
 
     Args:

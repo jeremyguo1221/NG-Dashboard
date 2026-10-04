@@ -47,8 +47,7 @@ def layout():
     return html.Div([
         dcc.Interval(id="storage-interval", interval=config.DEFAULT_INTERVALS["storage_ms"]),
         dbc.Alert(id="storage-banner", color="dark",
-                  style={"fontSize": "20px", "fontWeight": "700",
-                         "textAlign": "center", "padding": "20px"},
+                  className="term-strip",
                   children="Awaiting EIA data — enter API key in Settings."),
         dbc.Row([
             dbc.Col([
@@ -80,8 +79,6 @@ def layout():
 def _trajectory_section():
     """Full-width End-of-Season Trajectory Model panel below the cumulative chart."""
     return html.Div([
-        dcc.Interval(id="trajectory-interval",
-                     interval=config.DEFAULT_INTERVALS["trajectory_ms"]),
         html.Div([
             html.H4("End-of-Season Storage Trajectory Model",
                     style={"color": COLORS["TEXT"], "marginBottom": "4px",
@@ -224,7 +221,7 @@ def _build_seasonal_expanded_figure(df: pd.DataFrame, bands: pd.DataFrame) -> go
     years = sorted(df.index.year.unique())
     current_year = max(years)
     year_palette = [COLORS["MUTED"], COLORS["BLUE"], COLORS["ORANGE"],
-                    COLORS["WARN"], COLORS["BEAR"], "#9966ff", "#33cccc", "#cc66ff"]
+                    COLORS["WARN"], COLORS["BEAR"], COLORS["PURPLE"], COLORS["CYAN"], COLORS["AMBER"]]
     for i, yr in enumerate(years):
         d = df[df.index.year == yr].copy()
         if d.empty:
@@ -601,8 +598,10 @@ def register_callbacks(app):
         Input("storage-consensus", "value"),
     )
     def update_banner(data, consensus):
-        base_style = {"fontSize": "20px", "fontWeight": "700",
-                      "textAlign": "center", "padding": "20px"}
+        base_style = {"fontSize": "14px", "fontWeight": "700",
+                      "textAlign": "left", "padding": "8px 12px",
+                      "letterSpacing": "0.5px", "borderRadius": "0",
+                      "backgroundColor": COLORS["PANEL"]}
         if not data or data.get("weekly_change") is None:
             return "Awaiting EIA data — enter API key in Settings.", {**base_style, "backgroundColor": COLORS["PANEL"], "color": COLORS["MUTED"]}
         actual = data["weekly_change"]
@@ -613,7 +612,8 @@ def register_callbacks(app):
         label = "BULLISH SURPRISE" if bullish else "BEARISH SURPRISE"
         text = (f"WEEKLY CHANGE: {actual:+.0f} Bcf  •  CONSENSUS: {cons:+.0f}  •  "
                 f"SURPRISE: {surprise:+.0f}  •  {label}")
-        return text, {**base_style, "backgroundColor": color, "color": "#000"}
+        return text, {**base_style, "color": color,
+                      "border": f"1px solid {color}", "borderLeft": f"6px solid {color}"}
 
     @app.callback(
         Output("storage-countdown", "children"),

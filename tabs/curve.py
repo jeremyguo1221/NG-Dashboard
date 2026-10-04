@@ -12,21 +12,18 @@ import dash_bootstrap_components as dbc
 
 import config
 from data import futures
-from utils.theme import COLORS, plotly_layout
+from data import fundamentals as fd
+from utils.theme import COLORS, DIVERGING, plotly_layout
 
 
 def layout():
     return html.Div([
         dcc.Interval(id="curve-interval", interval=config.DEFAULT_INTERVALS["futures_ms"]),
         dbc.Row([
-            dbc.Col(html.Div(id="curve-regime-banner",
-                             style={"fontSize": "26px", "fontWeight": "800",
-                                    "textAlign": "center", "padding": "12px",
-                                    "backgroundColor": COLORS["PANEL"],
-                                    "border": f"1px solid {COLORS['GRID']}",
-                                    "marginBottom": "8px"}),
+            dbc.Col(html.Div(id="curve-regime-banner", className="term-strip"),
                     width=12),
         ]),
+        html.Div(id="curve-strips", className="quote-strip"),
         dcc.Graph(id="curve-main"),
         dcc.Slider(id="curve-history-slider", min=0, max=0, step=1, value=0,
                    marks={}, tooltip={"placement": "bottom", "always_visible": False}),
@@ -96,8 +93,13 @@ def _build_spread_heatmap(today_df):
         for j in range(n):
             if j > i and not math.isnan(prices[i]) and not math.isnan(prices[j]):
                 Z[i, j] = prices[j] - prices[i]
-    fig.add_trace(go.Heatmap(z=Z, x=labels, y=labels, colorscale="RdYlGn_r",
-                              zmid=0, text=Z, texttemplate="%{text:.2f}",
+    # Pre-formatted labels so the empty lower triangle stays blank (not "NaN").
+    text = [["" if np.isnan(v) else f"{v:.2f}" for v in row] for row in Z]
+    # Positive spread (contango) = bear/red, negative (backwardation) = bull/green.
+    scale = [[1 - stop, color] for stop, color in reversed(DIVERGING)]
+    fig.add_trace(go.Heatmap(z=Z, x=labels, y=labels, colorscale=scale,
+                              zmid=0, text=text, texttemplate="%{text}",
+                              textfont={"size": 9},
                               hovertemplate="Near %{y}<br>Far %{x}<br>Spread $%{z:.2f}<extra></extra>",
                               colorbar=dict(tickfont=dict(color=COLORS["TEXT"]))))
     fig.update_xaxes(title_text="Far")
@@ -126,19 +128,23 @@ def _build_roll_yield(today_df):
 
 
 def _build_winter_summer(today_df):
+    """Seasonal strip averages side by side, front month for reference."""
     fig = go.Figure()
-    fig.update_layout(**plotly_layout(title="Winter/Summer Spread (Nov − Apr)", height=320))
+    fig.update_layout(**plotly_layout(title="Seasonal Strips vs Front Month ($/MMBtu)",
+                                      height=320, showlegend=False))
     if today_df.empty:
         return fig
-    nov = today_df[today_df["label"].str.startswith("Nov")].head(1)
-    apr = today_df[today_df["label"].str.startswith("Apr")].head(1)
-    if nov.empty or apr.empty:
-        return fig
-    current = float(nov["price"].iloc[0]) - float(apr["price"].iloc[0])
-    fig.add_trace(go.Scatter(x=[dt.date.today()], y=[current], mode="markers",
-                              marker=dict(size=14, color=COLORS["BULL"] if current > 0 else COLORS["BEAR"]),
-                              name=f"Current: ${current:+.2f}"))
-    fig.update_yaxes(title_text="$/MMBtu")
+    strips = fd.curve_strips(today_df[["label", "price"]].to_dict("records"))
+    names = [k for k in strips if not ("−" in k or "(" in k)]
+    front = today_df["price"].dropna()
+    xs = (["FRONT " + today_df["label"].iloc[0].upper()] if not front.empty else []) + names
+    ys = ([float(front.iloc[0])] if not front.empty else []) + [strips[k] for k in names]
+    colors = [COLORS["AMBER"]] * (1 if not front.empty else 0) +              [COLORS["BLUE"] if k.startswith("WINTER") else
+              COLORS["BULL"] if k.startswith("SUMMER") else COLORS["PURPLE"] for k in names]
+    fig.add_trace(go.Bar(x=xs, y=ys, marker_color=colors,
+                         text=[f"{v:.3f}" for v in ys], textposition="outside",
+                         textfont={"color": COLORS["TEXT"]}))
+    fig.update_yaxes(title_text="$/MMBtu", range=[0, max(ys) * 1.2] if ys else None)
     return fig
 
 
@@ -231,10 +237,9 @@ def register_callbacks(app):
         Input("curve-history-store", "data"),
     )
     def regime_banner(data):
-        base = {"fontSize": "26px", "fontWeight": "800",
-                "textAlign": "center", "padding": "12px",
-                "backgroundColor": COLORS["PANEL"],
-                "border": f"1px solid {COLORS['GRID']}", "marginBottom": "8px"}
+        base = {"fontSize": "14px", "fontWeight": "700", "letterSpacing": "0.5px",
+                "textAlign": "left", "padding": "8px 12px",
+                "backgroundColor": COLORS["PANEL"], "marginBottom": "6px"}
         if not data:
             return "Awaiting curve data…", {**base, "color": COLORS["MUTED"]}
         regime = data.get("regime", "UNKNOWN")
@@ -243,7 +248,8 @@ def register_callbacks(app):
                      "MIXED": COLORS["WARN"], "UNKNOWN": COLORS["MUTED"]}
         color = color_map.get(regime, COLORS["TEXT"])
         text = f"{regime}  •  {consec} consecutive trading day{'s' if consec != 1 else ''}"
-        return text, {**base, "color": color}
+        return text, {**base, "color": color, "border": f"1px solid {color}",
+                      "borderLeft": f"6px solid {color}"}
 
     @app.callback(
         Output("curve-history-slider", "min"),
@@ -279,6 +285,26 @@ def register_callbacks(app):
                 scrub = history[keys[slider_val]]
         return _build_main_curve(today_df, data.get("week_ago"),
                                   data.get("month_ago"), scrub=scrub)
+
+    @app.callback(Output("curve-strips", "children"),
+                  Input("curve-history-store", "data"),
+                  Input("curve-interval", "n_intervals"))
+    def strips(data, _n):
+        vals = fd.curve_strips((data or {}).get("today") or [])
+        if not vals:
+            return html.Div("AWAITING CURVE DATA…", className="term-hint")
+        cells = []
+        for name, v in vals.items():
+            is_spread = "−" in name or "(" in name
+            color = COLORS["AMBER"] if is_spread else COLORS["TEXT"]
+            cells.append(html.Div([
+                html.Div(name, className="tb-label"),
+                html.Div(f"{v:+.3f}" if is_spread else f"{v:.3f}",
+                         className="tb-value", style={"color": color}),
+                html.Div("SPREAD $/MMBTU" if is_spread else "STRIP AVG $/MMBTU",
+                         className="tb-sub"),
+            ], className="tb-cell"))
+        return cells
 
     @app.callback(Output("curve-spread-heatmap", "figure"),
                   Input("curve-history-store", "data"))

@@ -48,7 +48,7 @@ _MODE_COLORBAR = {
 _DIVERGING_COLORSCALE = [
     [0.0,  "#660000"],   # max deficit — very deep crimson
     [0.25, "#cc0000"],   # mid deficit — saturated red
-    [0.5,  "#ffffff"],   # neutral
+    [0.5,  "#3a3a3a"],   # neutral (grey — white glares on the black terminal)
     [0.75, "#008833"],   # mid surplus — saturated forest green
     [1.0,  "#003311"],   # max surplus — very deep forest
 ]

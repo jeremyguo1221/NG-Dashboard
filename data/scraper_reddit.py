@@ -1,5 +1,5 @@
-"""Reddit scraper: PRAW when REDDIT_CLIENT_ID is set, public JSON fallback
-otherwise. Both paths emit the same normalised post dicts.
+"""Reddit scraper: PRAW when REDDIT_CLIENT_ID is set, public RSS fallback
+otherwise (the anonymous .json endpoints now return 403). Both paths emit the same normalised post dicts.
 
 Subreddits listed in config.NG_NATIVE_SUBREDDITS bypass the NG-relevance
 filter (everything in them is on-topic). General-investing subs require the
@@ -7,11 +7,15 @@ preprocessor's keyword/ticker check.
 """
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 import logging
 import os
+import re
+import time
 from typing import Iterable
 
+import feedparser
 import requests
 from dotenv import load_dotenv
 
@@ -20,11 +24,15 @@ import config
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-_PUBLIC_HEADERS = {
-    "User-Agent": os.environ.get("REDDIT_USER_AGENT",
-                                 "NGSentimentBot/1.0 (anon)"),
-    "Accept": "application/json",
+_RSS_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/130.0 Safari/537.36"),
+    "Accept": "application/atom+xml, application/xml;q=0.9, */*;q=0.8",
 }
+# Reddit 429s RSS requests fired back-to-back.
+_RSS_DELAY_S = 6.0
+_TAG_RE = re.compile(r"<[^>]+>")
 
 _PRAW = None
 _PRAW_TRIED = False
@@ -42,7 +50,7 @@ def _get_praw():
     sec = os.environ.get("REDDIT_CLIENT_SECRET", "").strip()
     ua  = os.environ.get("REDDIT_USER_AGENT", "").strip()
     if not (cid and sec and ua):
-        logger.warning("Reddit creds missing — falling back to public JSON")
+        logger.warning("Reddit creds missing — falling back to public RSS")
         return None
     try:
         import praw
@@ -53,7 +61,7 @@ def _get_praw():
         logger.info("Reddit PRAW authenticated (read-only)")
         return _PRAW
     except Exception:
-        logger.exception("PRAW init failed; using public JSON fallback")
+        logger.exception("PRAW init failed; using public RSS fallback")
         _PRAW = None
         return None
 
@@ -68,9 +76,11 @@ def fetch(subreddits: Iterable[str] | None = None,
     spec to reduce noise."""
     subs = list(subreddits or config.SUBREDDITS)
     reddit = _get_praw()
-    fetcher = _fetch_via_praw if reddit else _fetch_via_public_json
+    fetcher = _fetch_via_praw if reddit else _fetch_via_rss
     out: list[dict] = []
-    for sub in subs:
+    for i, sub in enumerate(subs):
+        if not reddit and i:
+            time.sleep(_RSS_DELAY_S)
         try:
             posts = fetcher(sub, limit_per_sub)
         except Exception:
@@ -118,60 +128,45 @@ def _fetch_via_praw(sub: str, limit: int) -> list[dict]:
     return rows
 
 
-# ── Public-JSON fallback ─────────────────────────────────────────────────────
+# ── Public RSS fallback ──────────────────────────────────────────────────────
 
-def _fetch_via_public_json(sub: str, limit: int) -> list[dict]:
+def _fetch_via_rss(sub: str, limit: int) -> list[dict]:
+    """Newest posts via /r/<sub>/new/.rss. RSS carries no score or comment
+    count, so the engagement filter is skipped and engagement_score is 0."""
+    url = f"https://www.reddit.com/r/{sub}/new/.rss?limit={limit}"
+    r = requests.get(url, headers=_RSS_HEADERS, timeout=15)
+    if r.status_code == 429:
+        time.sleep(_RSS_DELAY_S * 2)
+        r = requests.get(url, headers=_RSS_HEADERS, timeout=15)
+    if r.status_code == 429:
+        logger.warning("Reddit RSS rate-limited on r/%s; skipping", sub)
+        return []
+    if r.status_code != 200:
+        logger.warning("Reddit RSS %s for r/%s", r.status_code, sub)
+        return []
+    parsed = feedparser.parse(r.content)
     rows: list[dict] = []
-    seen: set[str] = set()
-    for listing in ("hot", "new"):
-        n = limit if listing == "hot" else max(limit // 2, 1)
-        url = f"https://www.reddit.com/r/{sub}/{listing}.json?limit={n}"
-        try:
-            r = requests.get(url, headers=_PUBLIC_HEADERS, timeout=15)
-        except Exception:
-            logger.exception("Reddit public JSON GET failed for r/%s/%s", sub, listing)
-            continue
-        if r.status_code == 429:
-            logger.warning("Reddit public JSON rate-limited on r/%s; backing off", sub)
-            continue
-        if r.status_code != 200:
-            logger.warning("Reddit public JSON %s for r/%s/%s",
-                           r.status_code, sub, listing)
-            continue
-        try:
-            payload = r.json()
-        except Exception:
-            logger.exception("Reddit public JSON parse failed")
-            continue
-        children = (payload.get("data") or {}).get("children") or []
-        for c in children:
-            d = c.get("data") or {}
-            sid = d.get("id")
-            if not sid or sid in seen:
-                continue
-            seen.add(sid)
-            score = int(d.get("score") or 0)
-            ncom  = int(d.get("num_comments") or 0)
-            if not _passes_engagement(score, ncom):
-                continue
-            created = dt.datetime.fromtimestamp(
-                float(d.get("created_utc") or 0), tz=dt.timezone.utc)
-            text = (d.get("title") or "")
-            if d.get("selftext"):
-                text += "\n" + d["selftext"]
-            rows.append({
-                "source": "reddit",
-                "source_name": f"r/{sub}",
-                "text": text,
-                "url": "https://www.reddit.com" + (d.get("permalink") or ""),
-                "author": d.get("author"),
-                "engagement_score": float(score + ncom),
-                "created_at": created,
-                "is_ng_native": sub in config.NG_NATIVE_SUBREDDITS,
-                "score": score,
-                "num_comments": ncom,
-                "upvote_ratio": d.get("upvote_ratio"),
-            })
+    for e in parsed.entries[:limit]:
+        st = getattr(e, "updated_parsed", None) or getattr(e, "published_parsed", None)
+        created = (dt.datetime.fromtimestamp(calendar.timegm(st), tz=dt.timezone.utc)
+                   if st else dt.datetime.now(dt.timezone.utc))
+        body = ""
+        if getattr(e, "content", None):
+            body = _TAG_RE.sub(" ", e.content[0].get("value", ""))
+            body = " ".join(body.replace("&#32;", " ").split())
+            # Drop Reddit's "submitted by /u/x [link] [comments]" footer.
+            body = body.split(" submitted by ")[0].strip()
+        title = (getattr(e, "title", "") or "").strip()
+        rows.append({
+            "source": "reddit",
+            "source_name": f"r/{sub}",
+            "text": title + ("\n" + body if body else ""),
+            "url": getattr(e, "link", None),
+            "author": (getattr(e, "author", "") or "").replace("/u/", "") or None,
+            "engagement_score": 0.0,
+            "created_at": created,
+            "is_ng_native": sub in config.NG_NATIVE_SUBREDDITS,
+        })
     return rows
 
 

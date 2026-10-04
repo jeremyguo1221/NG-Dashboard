@@ -145,7 +145,11 @@ def process(posts: Iterable[dict]) -> list[dict]:
             seen_urls.add(url)
 
         enriched = dict(p)
-        enriched["text"] = text         # overwrite with cleaned text
+        # Persist cleaned text but keep the title on its own first line so the
+        # News tab's headline feed can show it without the body.
+        raw_title, _, raw_body = (p.get("text") or "").partition("\n")
+        title, body = clean_text(raw_title), clean_text(raw_body)
+        enriched["text"] = f"{title}\n{body}" if title and body else text
         enriched["cleaned_text"] = text
         enriched["tickers"] = tickers
         out.append(enriched)

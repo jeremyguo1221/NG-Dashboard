@@ -363,6 +363,49 @@ def get_posts_for_ticker(ticker: str, since: dt.datetime,
         return out
 
 
+def get_recent_headlines(limit: int = 60,
+                         sources: Iterable[str] = ("news", "reddit")) -> list[dict]:
+    """Newest NG-relevant posts from headline-style sources, each tagged with
+    its FinBERT label. A post scored for several tickers carries the same
+    score on every row, so any one of them is representative."""
+    with session_scope() as s:
+        posts = s.execute(
+            select(RawPost)
+            .where(RawPost.source.in_(list(sources)))
+            .order_by(RawPost.created_at.desc())
+            .limit(limit * 2)
+        ).scalars().all()
+        # Cross-posts / syndicated stories repeat the same title — keep the newest.
+        seen: set[str] = set()
+        unique = []
+        for p in posts:
+            key = (p.text or "").split("\n", 1)[0].strip().lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(p)
+        posts = unique[:limit]
+        ids = [p.id for p in posts]
+        scores = {}
+        if ids:
+            for sc in s.execute(select(SentimentScore)
+                                .where(SentimentScore.post_id.in_(ids))).scalars():
+                scores.setdefault(sc.post_id, sc)
+        out = []
+        for p in posts:
+            sc = scores.get(p.id)
+            out.append({
+                "source": p.source,
+                "source_name": p.source_name,
+                "title": (p.text or "").split("\n", 1)[0],
+                "url": p.url,
+                "created_at": p.created_at,
+                "label": sc.label if sc else None,
+                "confidence": sc.confidence if sc else None,
+            })
+        return out
+
+
 def get_last_updated() -> Optional[dt.datetime]:
     with session_scope() as s:
         return s.execute(

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import time
 
 import pandas as pd
 
@@ -25,7 +26,9 @@ def next_n_contracts(today: dt.date, n: int = 24) -> list[tuple[str, str, dt.dat
     """Return [(label, ticker, approximate_expiry_date)] for the next n contract months."""
     out = []
     y, m = today.year, today.month
-    if today.day >= 26:
+    # Skip the current-month contract once it has expired (3rd-to-last
+    # business day of the prior month) — yfinance 404s on expired codes.
+    while _ng_expiry_date(y, m) < today:
         m += 1
         if m > 12:
             m = 1; y += 1
@@ -113,14 +116,26 @@ def fetch_front_month_price() -> tuple[float, float, float]:
         return float("nan"), float("nan"), float("nan")
 
 
+_HISTORY_CACHE: dict[tuple[str, str], tuple[float, pd.DataFrame]] = {}
+_HISTORY_TTL_S = 3600
+
+
 def fetch_history(ticker: str, period: str = "1y") -> pd.DataFrame:
+    """Daily closes for `ticker`, cached in-process for an hour."""
     if yf is None:
         return pd.DataFrame()
+    key = (ticker, period)
+    hit = _HISTORY_CACHE.get(key)
+    if hit and time.time() - hit[0] < _HISTORY_TTL_S:
+        return hit[1]
     try:
         h = yf.Ticker(ticker).history(period=period, interval="1d")
-        return h[["Close"]].rename(columns={"Close": "close"})
+        out = h[["Close"]].rename(columns={"Close": "close"})
     except Exception:
         return pd.DataFrame()
+    if not out.empty:
+        _HISTORY_CACHE[key] = (time.time(), out)
+    return out
 
 
 def roll_yield(prices: list[float], expiries: list[dt.date]) -> list[float]:

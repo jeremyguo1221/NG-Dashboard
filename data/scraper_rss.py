@@ -1,22 +1,31 @@
 """RSS news scraper. Emits normalised post dicts identical in shape to the
 other scrapers.
 
-Feeds in config.NG_NATIVE_FEEDS bypass the NG-relevance filter (RBN, EIA,
-Rigzone, Hart Energy — already on-topic). Other feeds (Reuters, Benzinga,
-Seeking Alpha) pass through the preprocessor's keyword/ticker filter.
+Feeds in config.NG_NATIVE_FEEDS bypass the NG-relevance filter (EIA, NGI,
+Rigzone, Google News NG queries — already on-topic). Other feeds (CNBC,
+OilPrice, Seeking Alpha) pass through the preprocessor's keyword/ticker filter.
 """
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 import logging
-import time
 from typing import Iterable
 
 import feedparser
+import requests
 
 import config
 
 logger = logging.getLogger(__name__)
+
+# Several publishers 403 feedparser's default / bot-looking user agents.
+_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/130.0 Safari/537.36"),
+    "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
+}
 
 
 def fetch(feeds: Iterable[tuple[str, str]] | None = None) -> list[dict]:
@@ -26,9 +35,15 @@ def fetch(feeds: Iterable[tuple[str, str]] | None = None) -> list[dict]:
     out: list[dict] = []
     for name, url in feeds:
         try:
-            parsed = feedparser.parse(url, request_headers={
-                "User-Agent": "NGSentimentBot/1.0 (RSS reader)",
-            })
+            r = requests.get(url, headers=_HEADERS, timeout=20)
+        except Exception as e:
+            logger.warning("feed %s GET failed: %r", name, e)
+            continue
+        if r.status_code != 200:
+            logger.warning("feed %s HTTP %s", name, r.status_code)
+            continue
+        try:
+            parsed = feedparser.parse(r.content)
         except Exception:
             logger.exception("feedparser raised for %s", name)
             continue
@@ -57,7 +72,9 @@ def _normalise(entry, source_name: str) -> dict:
         st = getattr(entry, attr, None)
         if st:
             try:
-                ts = dt.datetime.fromtimestamp(time.mktime(st), tz=dt.timezone.utc)
+                # feedparser normalises to a UTC struct_time; timegm (not
+                # mktime, which assumes local time) keeps it in UTC.
+                ts = dt.datetime.fromtimestamp(calendar.timegm(st), tz=dt.timezone.utc)
                 break
             except Exception:
                 continue

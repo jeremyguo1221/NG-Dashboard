@@ -15,11 +15,12 @@ from tabs import weather as tab_weather
 from tabs import news as tab_news
 from tabs import positioning as tab_positioning
 from tabs import curve as tab_curve
+from tabs import fundamentals as tab_fund
 
 
 def _fig_to_png_bytes(fig, width=1400, height=600):
     try:
-        return fig.to_image(format="png", width=width, height=height, engine="kaleido")
+        return fig.to_image(format="png", width=width, height=height)
     except Exception:
         return None
 
@@ -49,6 +50,7 @@ def build_pdf_snapshot(stores: dict) -> bytes:
         ("News",        tab_news),
         ("Positioning", tab_positioning),
         ("Curve",       tab_curve),
+        ("Fundamentals", tab_fund),
     ]
 
     for tab_label, module in tab_modules:

@@ -6,7 +6,15 @@ dcc.Store(storage_type='local'). The values here are the defaults used on
 first launch before the user touches anything.
 """
 
-EIA_API_KEY_FALLBACK = "oMBzV4QQ9xCu2B9lIJYzYtL0wGxiau5hZ6QUhE1p"
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Default EIA v2 key, read from .env (EIA_API_KEY). Can still be overridden at
+# runtime from the Settings modal.
+EIA_API_KEY_FALLBACK = os.environ.get("EIA_API_KEY", "")
 
 EIA_STORAGE_URL = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/"
 EIA_PRODUCTION_URL = "https://api.eia.gov/v2/natural-gas/prod/sum/data/"
@@ -125,18 +133,20 @@ DEMAND_BAND_5Y = {
 # in data/preprocessor.py before they reach FinBERT to save compute).
 RSS_FEEDS = [
     # NG-native — bypass relevance filter
-    ("RBN Energy",          "https://rbnenergy.com/feed"),
+    ("Google News NG",      "https://news.google.com/rss/search?q=%22natural+gas%22+when:2d&hl=en-US&gl=US&ceid=US:en"),
+    ("Google News LNG/HH",  "https://news.google.com/rss/search?q=LNG+OR+%22henry+hub%22+when:2d&hl=en-US&gl=US&ceid=US:en"),
+    ("NGI",                 "https://www.naturalgasintel.com/feed/"),
     ("EIA Today in Energy", "https://www.eia.gov/rss/todayinenergy.xml"),
     ("Rigzone",             "https://www.rigzone.com/news/rss/rigzone_latest.aspx"),
-    ("Hart Energy",         "https://www.hartenergy.com/rss.xml"),
-    # Broad financial — filtered by NG ticker or keyword presence
-    ("Reuters Business",    "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best"),
-    ("Benzinga",            "https://feeds.benzinga.com/benzinga"),
+    # Broad energy / financial — filtered by NG ticker or keyword presence
+    ("OilPrice",            "https://oilprice.com/rss/main"),
+    ("CNBC Energy",         "https://www.cnbc.com/id/19836768/device/rss/rss.html"),
     ("Seeking Alpha",       "https://seekingalpha.com/feed.xml"),
 ]
 
 # Feed names in NG_NATIVE_FEEDS bypass the NG-relevance pre-filter.
-NG_NATIVE_FEEDS = {"RBN Energy", "EIA Today in Energy", "Rigzone", "Hart Energy"}
+NG_NATIVE_FEEDS = {"Google News NG", "Google News LNG/HH", "NGI",
+                   "EIA Today in Energy", "Rigzone"}
 
 # Subreddits scraped by data/scraper_reddit.py. NG-native subs bypass the
 # relevance filter; general investing subs are filtered by ticker/keyword.
