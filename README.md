@@ -1,166 +1,176 @@
-# NG Trading Intelligence Dashboard
+# NG Terminal: Natural Gas Trading Dashboard
 
-A unified natural-gas trading intelligence dashboard built as a single Plotly Dash application. Five tabs cover the inputs that move the front of the curve: **Storage**, **Weather**, **News**, **Positioning**, **Curve**. The **News** tab runs a full FinBERT sentiment pipeline (Reddit + RSS + StockTwits + Bluesky) scoped to NG-relevant tickers.
+A Bloomberg-terminal-style dashboard for **US natural gas (Henry Hub)** trading, built in Python with Plotly Dash. It brings together the data that moves the front of the gas curve on one screen:
 
-## Quick start
+- **EIA storage**, with an end-of-season storage forecast
+- **Weather** forecasts for 68 US cities
+- **CFTC trader positioning**
+- **The full NYMEX futures curve**
+- **International gas prices** (Europe TTF, Asia JKM)
+- **A live news and social-media sentiment pipeline**, scored with FinBERT
 
-1. **Install dependencies**
+Everything uses free, public data sources. No paid data feed is needed.
 
-   ```powershell
-   pip install -r requirements.txt
-   ```
+![Storage tab](docs/screenshots/storage.png)
 
-2. **Set up secrets**
+---
 
-   Copy `.env.example` → `.env` and fill in what you have. Reddit credentials are optional — without them the Reddit scraper falls back to the public `old.reddit.com/.json` endpoint. Discord webhooks are optional.
+## Highlights
 
-   ```
-   REDDIT_CLIENT_ID=...
-   REDDIT_CLIENT_SECRET=...
-   REDDIT_USER_AGENT=NGSentimentBot/1.0 (by /u/your_handle)
-   DISCORD_WEBHOOK_URL=         # optional
-   DB_URL=sqlite:///data/sentiment.db
-   USE_GPU=false
-   ```
+- **Six tabs, one terminal.** Storage, weather, news, positioning, curve and fundamentals. Switch with the tab bar, or type commands like `4`, `POSN`, `COT` or `TTF` into the `<GO>` box, the way you would on a Bloomberg terminal.
+- **Live sentiment pipeline.** A background job runs every 15 minutes. It collects posts from Reddit, eight RSS news feeds, StockTwits and Bluesky, and keeps only gas-related ones. FinBERT (a finance language model) scores each post's sentiment. The scores are rolled up into per-ticker signals over 1-hour, 4-hour and 24-hour windows, and alerts fire on big moves.
+- **Storage forecasting.** A model projects where US gas storage ends the season (Nov 1 or Apr 1). It starts from 10 years of seasonal patterns, then adjusts for production, LNG exports, demand and weather forecasts, and gives base/bull/bear scenarios with a confidence band.
+- **Global gas and fundamentals.** Henry Hub, Dutch TTF and Asian JKM on one $/MMBtu scale, the price gap that drives US LNG exports, cash vs. futures prices, and EIA monthly production, LNG exports and power-sector demand compared year over year.
+- **Terminal UI.** Black and amber theme, monospace type, a scrolling headline tape, and one-click PDF snapshots of every chart.
+- **Built to keep running.** If one data source fails, the rest still update. Results are cached so switching tabs doesn't re-download data, and every timestamp is stored in UTC.
 
-3. **Get a free EIA API key** at <https://www.eia.gov/opendata/register.php>, then launch the app and paste it into the **Settings** modal (top-right of the navbar). Settings persist in `localStorage` and survive browser refreshes.
+## Screenshots
 
-4. **Run**
+| | |
+|---|---|
+| **News & Sentiment**: live headlines plus the FinBERT sentiment table and per-ticker detail ![News](docs/screenshots/news.png) | **Positioning**: CFTC hedge-fund (managed money) positions, where they rank historically, and what happened to prices after past extremes ![Positioning](docs/screenshots/positioning.png) |
+| **Curve**: 24-month forward curve, seasonal averages, calendar spreads, roll yield ![Curve](docs/screenshots/curve.png) | **Fundamentals**: global prices, export economics, cash vs. futures, EIA supply and demand ![Fundamentals](docs/screenshots/fundamentals.png) |
+| **Weather**: temperature map for 68 cities, which forecasts changed most, heating-demand forecast by region ![Weather](docs/screenshots/weather.png) | **Storage**: weekly change vs. analyst estimate, seasonal range, end-of-season forecast, regional map ![Storage](docs/screenshots/storage.png) |
 
-   ```powershell
-   python app.py
-   ```
+## What each tab shows
 
-   First launch downloads the FinBERT weights (~440 MB) into the HuggingFace cache. Subsequent runs are instant. Open <http://127.0.0.1:8055> in your browser.
+| Tab | Contents |
+|---|---|
+| **1) STOR**: EIA storage | Weekly change vs. your consensus estimate, flagged bullish or bearish. 52-week bar chart of weekly changes. Current storage vs. the 5-year range. Cumulative injections vs. the 5-year average. **End-of-season forecast** with scenarios. Regional map and cards (South Central split into salt/non-salt). |
+| **2) WTHR**: Weather | Map of 68 demand-weighted cities, switchable between temperature, heating degree days and forecast changes. Ranking of the biggest forecast changes vs. 24h and 72h ago. 10-day regional heating-degree-day forecast. Estimated gas demand from homes and businesses vs. the 5-year range. |
+| **3) NEWS**: News & Sentiment | **Top News** feed (newest first, tagged bullish/bearish by FinBERT). Sentiment table for 24 gas tickers: composite signal, sentiment score, mention count, bull/bear ratio and velocity (how fast sentiment is changing). Per-ticker detail: score history, mention volume, source mix, most bullish and bearish posts. |
+| **4) POSN**: CFTC positioning | Hedge-fund (managed money) longs, shorts and net position. Where today's net position ranks vs. the last 3 years. Two-year heatmap of weekly changes. 4-week momentum. Net positions of hedge funds vs. producers vs. swap dealers. Price moves over the 2 weeks after past extreme readings. |
+| **5) CURV**: Forward curve | Market structure (contango vs. backwardation). **Seasonal averages**: next winter, next summer, the following winter, calendar 2027. Key spreads: winter minus summer, Mar/Apr, Oct/Jan. 24-month curve vs. 1 week and 1 month ago. Heatmap of every calendar spread. Annualized roll yield. |
+| **6) FUND**: Fundamentals | Henry Hub, TTF (converted from €/MWh to $/MMBtu) and JKM on one scale. TTF and JKM premiums over Henry Hub. Henry Hub cash vs. front-month futures. EIA monthly production, LNG exports, power-sector demand and Canadian imports, each overlaid by year. |
 
-## Layout
+The top bar always shows the front-month price and change, storage vs. the 5-year average, the hedge-fund net position, a sentiment indicator and the New York time. The bottom tape scrolls key numbers and the latest headlines.
 
-```
-app.py                       # entry point + navbar + tab routing + snapshot
-config.py                    # tickers, subreddits, feeds, NG keywords, knobs
-scheduler.py                 # APScheduler jobs (15m / 1h / 6h)
-seed_tickers.py              # NG company-name → ticker dictionary
-.env.example                 # template for secrets
+## Architecture
 
-tabs/{storage,weather,news,positioning,curve}.py
-data/{eia,weather,cftc,futures,trajectory,alerts}.py            # existing NG sources
+```mermaid
+flowchart LR
+    subgraph Sources["Free data sources"]
+        EIA[EIA API v2]
+        YF[yfinance<br/>NYMEX / ICE futures]
+        CFTC[CFTC COT<br/>disaggregated]
+        OM[Open-Meteo<br/>68 cities]
+        SOC[Reddit · RSS · StockTwits · Bluesky]
+    end
 
-# Sentiment pipeline (NG-focused)
-data/sentiment_db.py         # SQLAlchemy ORM + session manager
-data/finbert_scorer.py       # singleton FinBERT loader + batched inference
-data/preprocessor.py         # text cleaning, ticker extraction, NG relevance
-data/scraper_reddit.py       # PRAW + public-JSON fallback
-data/scraper_rss.py          # feedparser (NG + financial feeds)
-data/scraper_stocktwits.py   # cashtag streams (Twitter replacement)
-data/scraper_bluesky.py      # AT Protocol public searchPosts
-data/scraper_manager.py      # orchestration + retry helper
-data/signal_aggregator.py    # per-window composite + velocity
-data/alerts_sentiment.py     # threshold alerts → DB + log + Discord
+    subgraph Pipeline["Background pipeline (APScheduler, 15 min)"]
+        PRE[Preprocess<br/>clean · tickers · NG filter · dedup]
+        FB[FinBERT scoring]
+        AGG[Aggregate 1h / 4h / 24h<br/>composite + velocity]
+        ALR[Threshold alerts<br/>→ DB, log, Discord]
+    end
 
-utils/{theme,snapshot}.py
-assets/custom.css
-logs/sentiment.log           # rotating, gitignored
-data/sentiment.db            # SQLite, gitignored
-```
+    DB[(SQLite / Postgres<br/>SQLAlchemy)]
 
-Each tab module exports `layout()` and `register_callbacks(app)`. The News tab reads exclusively from the sentiment DB; scraping/scoring happen in `scheduler.py` background jobs.
+    subgraph App["Plotly Dash app"]
+        TABS[6 tab modules<br/>layout + callbacks]
+        THEME[utils/theme<br/>terminal styling]
+        PDF[PDF snapshot<br/>kaleido + reportlab]
+    end
 
-## How the sentiment pipeline works
-
-The pipeline is **NG-focused throughout** — the watchlist is gas-sector tickers (UNG, EQT, LNG, KMI, …), not S&P 500 names. Non-native sources (Reuters, Benzinga, Seeking Alpha, /r/wallstreetbets, Bluesky) are filtered against an NG-keyword list and ticker set before reaching FinBERT, so compute isn't burned on irrelevant chatter.
-
-```
-                  ┌───────────────────────┐
-                  │   APScheduler 15-min  │
-                  └───────────┬───────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ▼                     ▼                     ▼
-   scraper_reddit       scraper_rss          scraper_stocktwits, scraper_bluesky
-        │                     │                     │
-        └─────────────────────┼─────────────────────┘
-                              ▼
-                preprocessor.process(...)
-                ├── clean text
-                ├── extract tickers (cashtag regex + company-name dict)
-                ├── NG-relevance filter (keep if ticker OR keyword)
-                └── dedup by URL
-                              ▼
-              finbert_scorer.score_batch([texts])
-                  positive / negative / neutral / confidence
-                              ▼
-              sentiment_db.insert_post + insert_scores
-              (only confidence ≥ 0.60 persisted)
-                              ▼
-            signal_aggregator.update_window('1h')
-              composite = 0.5·sentiment + 0.3·bull_bear + 0.2·vol_pct
-                              ▼
-            alerts_sentiment.check_thresholds('1h')
-              composite>70, |velocity|>30, volume>3×7d-mean
-                              ▼
-              dashboard reads via tabs/news.py + nav callbacks
+    SOC --> PRE --> FB --> DB
+    DB --> AGG --> DB
+    AGG --> ALR
+    EIA & YF & CFTC & OM --> TABS
+    DB --> TABS
+    THEME --> TABS
+    TABS --> PDF
 ```
 
-Hourly + 6-hourly jobs roll the 4h and 24h aggregates and prune raw posts older than 30 days.
+- **Each tab is its own module.** Each one in `tabs/` defines its layout and its update logic, and the main `app.py` just plugs them in.
+- **Data code is separate from display code.** Everything in `data/` is plain Python with no Dash imports, so it can be tested on its own.
+- **Sentiment runs in the background.** The scheduler writes posts and scores to the database, and the dashboard only reads from it. Pages stay fast because scraping and scoring never happen while you browse.
+- **One shared theme.** All colors and chart styles come from `utils/theme.py`, so every chart looks the same.
 
-## Settings
+## Sentiment pipeline
 
-Click **Settings** in the top-right navbar:
-- EIA API key
-- Weather refresh interval (minutes)
-- Cities to include in weather/demand panels
-- Sentiment tickers (one per line)
+```
+APScheduler (every 15 min, first run ~20 s after start)
+  └─ scraper_manager.run_all()        Reddit (PRAW or RSS) · 8 RSS feeds · StockTwits · Bluesky
+       └─ preprocessor.process()      clean → extract tickers ($cashtags + company names)
+                                      → keep only gas-related posts → dedup by URL
+            └─ finbert_scorer          ProsusAI/finbert, batched, CPU or CUDA
+                 └─ sentiment_db       keep scores with confidence ≥ 0.60
+                      └─ signal_aggregator (1h, 4h, 24h)
+                           composite = 0.5·sentiment + 0.3·bull/bear + 0.2·volume percentile
+                      └─ alerts_sentiment
+                           |composite| > 70 · |velocity| > 30 · volume > 3× 7-day mean
+```
 
-Values are saved to `dcc.Store(storage_type='local')`. Sentiment-ticker changes take effect after a restart (the scheduler caches the watchlist).
+Gas-specific sources (EIA, NGI, Rigzone, Google News gas queries, gas subreddits) skip the relevance filter. General sources (CNBC, OilPrice, Seeking Alpha, r/wallstreetbets, Bluesky) only get through if a post mentions a tracked ticker or a gas keyword.
 
-## Snapshot PDF
-
-Click **Snapshot** in the top-right navbar to download a landscape PDF containing the current state of every chart across all five tabs. Rendered with `kaleido` (charts) + `reportlab` (assembly). The News tab snapshot now pulls from the sentiment DB directly — no in-memory store required.
+**Tracked tickers (24):**
+- **ETFs:** UNG, BOIL, KOLD, FCG, UNL
+- **Gas producers:** EQT, AR, RRC, SWN, CTRA, CHK, MTDR, OVV, CNX, COG
+- **LNG:** LNG, CQP, NFE, TELL
+- **Pipelines:** KMI, WMB, OKE, ET
+- **NG_FUTURES:** a catch-all for general gas-market posts that don't name a ticker
 
 ## Data sources
 
-| Tab | Source | Refresh |
+| Data | Source | Refresh |
 |---|---|---|
-| Storage | EIA v2 API — `natural-gas/stor/wkly` | 10 min |
-| Weather | Open-Meteo (no key required) | 10 min |
-| News    | Reddit (PRAW or public JSON) · RSS (RBN, EIA, Rigzone, Hart, Reuters, Benzinga, Seeking Alpha) · StockTwits public streams · Bluesky public `searchPosts` | 15 min (background) + 60 s (UI auto-refresh) |
-| Positioning | CFTC COT legacy futures-only / financial futures (auto-fallback) | weekly |
-| Curve | yfinance — NYMEX NG futures `NG=F`, `NG{M}{YY}.NYM` | 30 s |
+| Weekly storage (national + regional) | EIA API v2 `natural-gas/stor/wkly` | 10 min |
+| Production, LNG exports, power burn, Canada imports | EIA API v2 monthly series | 6 h cache |
+| Henry Hub spot | EIA API v2 `RNGWHHD` (daily) | 6 h cache |
+| NYMEX NG front month + 24-month curve | yfinance `NG=F`, `NG{M}{YY}.NYM` | 30 s |
+| TTF, JKM, EUR/USD | yfinance `TTF=F`, `JKM=F`, `EURUSD=X` | 15 min cache |
+| Trader positioning | CFTC disaggregated COT (`com_disagg_xls_{year}.zip`) | weekly |
+| Weather (68 cities, 10-day hourly) | Open-Meteo (no key needed) | 15 min |
+| News & social | Reddit, Google News, NGI, EIA, Rigzone, OilPrice, CNBC, Seeking Alpha, StockTwits, Bluesky | 15 min (background) |
 
-### NG-relevant tickers tracked
+## Tech stack
 
-NG ETFs: UNG, BOIL, KOLD, FCG, UNL
-US E&P (gas-heavy): EQT, AR, RRC, SWN, CTRA, CHK, MTDR, OVV, CNX, COG
-LNG: LNG, CQP, NFE, TELL
-Pipelines / midstream: KMI, WMB, OKE, ET
-Virtual macro bucket: NG_FUTURES (Henry Hub, NYMEX NG futures, generic NG macro posts)
+**Python 3.11** · Plotly Dash 4 + Dash Bootstrap Components · Plotly · pandas / NumPy · Hugging Face Transformers + PyTorch (FinBERT) · SQLAlchemy 2 (SQLite by default, Postgres-ready) · APScheduler · yfinance · feedparser · requests · reportlab + kaleido
 
-## Alerts
+## Quick start
 
-The sentiment pipeline fires alerts when:
-- composite signal crosses ±70 (strong),
-- 1h velocity exceeds ±30 points (rapid shift), or
-- mention volume exceeds 3× the 7-day rolling mean.
+```bash
+pip install -r requirements.txt
+cp .env.example .env        # add EIA_API_KEY (free: https://www.eia.gov/opendata/register.php)
+python app.py               # open http://127.0.0.1:8055
+```
 
-Each alert is logged to `logs/sentiment.log`, written to the `alerts` DB table (read by the navbar pill), and — if `DISCORD_WEBHOOK_URL` is set — posted to Discord with 3-retry exponential backoff. In-memory dedup prevents the same `(ticker, trigger)` from firing more than once per hour.
+On first launch, FinBERT downloads its model files (~440 MB) into the Hugging Face cache. The first sentiment run starts about 20 seconds after startup.
 
-## Troubleshooting
+Settings in `.env`:
 
-- **FinBERT first-run is slow or fails to download**: the ~440 MB HuggingFace download needs network access to `huggingface.co`. If the download is interrupted, delete `~/.cache/huggingface/hub/models--ProsusAI--finbert/` and re-launch.
-- **CUDA OOM or torch import error**: set `USE_GPU=false` in `.env` to force CPU; FinBERT runs comfortably on CPU at the 15-min cadence.
-- **Reddit returns no posts**: without `REDDIT_CLIENT_ID/SECRET` we fall back to public `old.reddit.com/.json` which can rate-limit aggressively. Register a free script app at <https://www.reddit.com/prefs/apps>.
-- **StockTwits 404 for NG_F**: not every continuous-futures symbol is quoted on StockTwits; the scraper logs and skips.
-- **Bluesky cold start**: the public AT Protocol search has been intermittently rate-limited in the past — failures degrade gracefully without taking the run down.
-- **`kaleido` fails on Windows / `Snapshot` returns empty**: pinned to `kaleido==0.2.1` because newer 0.4.x has a known Windows subprocess bug.
-- **`yfinance` returns NaN for back-month tickers**: outer-month NG tickers (e.g. `NGZ26.NYM`) are not always quoted on Yahoo; the curve chart skips NaNs.
+| Variable | Required | Purpose |
+|---|---|---|
+| `EIA_API_KEY` | yes | Storage, fundamentals and the storage forecast. Can also be pasted into the in-app **Settings** panel |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` / `REDDIT_USER_AGENT` | no | Uses the official Reddit API. Without it, the app falls back to Reddit's public RSS feeds, which are rate-limited |
+| `DISCORD_WEBHOOK_URL` | no | Posts sentiment alerts to Discord |
+| `DB_URL` | no | Defaults to `sqlite:///data/sentiment.db`. Can point to a Postgres database instead |
+| `USE_GPU` | no | Set to `true` to run FinBERT on a CUDA GPU |
 
-## Running on a Mac / Linux
+## Project layout
 
-The app is portable — replace `powershell` with your shell of choice. PyTorch, Plotly Dash, kaleido 0.2.1, and reportlab all install cleanly on macOS and Linux. For GPU acceleration on Linux/CUDA, install the matching `torch` wheel for your CUDA version before running `pip install -r requirements.txt`.
+```
+app.py                  shell: top bar, tab bar + <GO> box, ticker tape, settings, PDF snapshot
+config.py               tickers, feeds, cities, keywords, model settings, refresh intervals
+scheduler.py            background jobs (15-min pipeline, 6-hour cleanup)
+tabs/                   one module per tab: storage, weather, news, positioning, curve, fundamentals
+                        (+ regional_storage, embedded in the Storage tab)
+data/                   data fetching and models, no Dash imports
+  eia.py, trajectory.py         EIA storage + end-of-season forecast
+  fundamentals.py               global prices, EIA monthly data, curve strip math
+  futures.py, cftc.py, weather.py
+  scraper_*.py, preprocessor.py, finbert_scorer.py,
+  sentiment_db.py, signal_aggregator.py, alerts_sentiment.py
+utils/theme.py          terminal colors + shared chart styling
+utils/snapshot.py       multi-page PDF export
+assets/custom.css       terminal styling
+docs/screenshots/       images used in this README
+```
 
-## Architecture notes
+## Known limitations
 
-- All theming flows through `utils/theme.plotly_layout()` — no tab redefines colors.
-- Sentiment data flows through SQLite (or Postgres via `DB_URL`), not `dcc.Store`. APScheduler writes; Dash reads.
-- All timestamps are stored as UTC and rendered in local time.
-- Every `data/*.py` network call is wrapped in `try/except` and either returns an empty result on failure or logs and continues. Per-source failure does not kill the 15-minute cycle.
+- **Prices are delayed, not real-time.** Yahoo Finance quotes lag the exchange, and some far-out futures months aren't always quoted.
+- **No rig counts.** Baker Hughes blocks automated downloads, and no free source publishes the numbers in a readable form.
+- **JKM metadata is missing.** Yahoo gives no description for the JKM contract, so its $/MMBtu units are inferred from the price level.
+- **EIA monthly data lags** by about two months.
+- **Reddit is partial without login.** Reddit's public RSS feeds are rate-limited, so some subreddits are skipped each run until API credentials are added.
